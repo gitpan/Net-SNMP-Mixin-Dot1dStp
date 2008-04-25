@@ -3,27 +3,59 @@ NAME
     information
 
 VERSION
-    Version 0.01_01
+    Version 0.02
 
 SYNOPSIS
-    A mixin class for Net::SNMP for spanning tree info.
-
       use Net::SNMP;
       use Net::SNMP::Mixin qw/mixer init_mixins/;
 
       my $session = Net::SNMP->session( -hostname => 'foo.bar.com' );
-
-      # object based mixin
       $session->mixer('Net::SNMP::Mixin::Dot1dStp');
-
       $session->init_mixins;
-      snmp_dispatcher() if $session->nonblocking;
+
+      snmp_dispatcher()   if $session->nonblocking;
       die $session->error if $session->error;
 
-      TODO
+      my $stp_group = $session->get_dot1d_stp_group;
+
+      printf "TopoChanges:    %d\n", $stp_group->{dot1dStpTopChanges};
+      printf "ThisRootPort:   %d\n", $stp_group->{dot1dStpRootPort};
+      printf "ThisRootCost:   %d\n", $stp_group->{dot1dStpRootCost};
+      printf "ThisStpPrio:    %d\n", $stp_group->{dot1dStpPriority};
+      printf "RootBridgeMAC:  %s\n",
+        $stp_group->{dot1dStpDesignatedRootAddress};
+      printf "RootBridgePrio: %d\n",
+        $stp_group->{dot1dStpDesignatedRootPriority};
+
+      my $stp_ports = $session->get_dot1d_stp_port_table;
+      foreach my $port ( sort { $a <=> $b } keys %$stp_ports ) {
+        my $enabled = $stp_ports->{$port}{dot1dStpPortEnable};
+        next unless defined $enabled && $enabled == 1;
+
+        printf "----------- STP Port: %d ---------\n", $port;
+        printf "PState:      %d\n", $stp_ports->{$port}{dot1dStpPortState};
+        printf "PStateStr:   %d\n",
+          $stp_ports->{$port}{dot1dStpPortStateString};
+        printf "PPrio:       %d\n",
+          $stp_ports->{$port}{dot1dStpPortPriority};
+        printf "PCost:       %d\n",
+          $stp_ports->{$port}{dot1dStpPortPathCost};
+        printf "PDesigCost:  %d\n",
+          $stp_ports->{$port}{dot1dStpPortDesignatedCost};
+        printf "DBridgePrio: %d\n",
+          $stp_ports->{$port}{dot1dStpPortDesignatedBridgePriority};
+        printf "DBridgeMAC:  %d\n",
+          $stp_ports->{$port}{dot1dStpPortDesignatedBridgeAddress};
+        printf "DPortPrio:   %d\n",
+          $stp_ports->{$port}{dot1dStpPortDesignatedPortPriority};
+        printf "DPortNr:     %d\n",
+          $stp_ports->{$port}{dot1dStpPortDesignatedPortNumber};
+      }
 
 DESCRIPTION
-    TODO
+    This mixin reads data from the dot1dStp group out of the BRIDGE-MIB.
+    Normally it's implemented by those bridges that support the Spanning
+    Tree Protocol.
 
 MIXIN METHODS
   OBJ->get_dot1d_stp_group()
@@ -90,7 +122,9 @@ MIXIN METHODS
           dot1dStpPortDesignatedPortPriority => INTEGER,
           dot1dStpPortDesignatedPortNumber   => INTEGER,
 
-          }
+          },
+
+        ... ,
       }
 
     The structs BridgeId and PortId are already splitted by this mixin

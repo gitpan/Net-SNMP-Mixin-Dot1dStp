@@ -70,51 +70,69 @@ use constant {
   DOT1D_STP_PORT_FORWARD_TRANSITIONS => '1.3.6.1.2.1.17.2.15.1.10',
 };
 
-#
-# The port's current state translation table
-#
-my %port_state_enum = (
-  1 => 'disabled',
-  2 => 'blocking',
-  3 => 'listening',
-  4 => 'learning',
-  5 => 'forwarding',
-  6 => 'broken',
-);
-
 =head1 NAME
 
 Net::SNMP::Mixin::Dot1dStp - mixin class for 802.1D spanning tree information
 
 =head1 VERSION
 
-Version 0.01_01
+Version 0.02
 
 =cut
 
-our $VERSION = '0.01_01';
+our $VERSION = '0.02';
 
 =head1 SYNOPSIS
-
-A mixin class for Net::SNMP for spanning tree info.
 
   use Net::SNMP;
   use Net::SNMP::Mixin qw/mixer init_mixins/;
 
   my $session = Net::SNMP->session( -hostname => 'foo.bar.com' );
-
-  # object based mixin
   $session->mixer('Net::SNMP::Mixin::Dot1dStp');
-
   $session->init_mixins;
-  snmp_dispatcher() if $session->nonblocking;
+
+  snmp_dispatcher()   if $session->nonblocking;
   die $session->error if $session->error;
 
-  TODO
+  my $stp_group = $session->get_dot1d_stp_group;
+
+  printf "TopoChanges:    %d\n", $stp_group->{dot1dStpTopChanges};
+  printf "ThisRootPort:   %d\n", $stp_group->{dot1dStpRootPort};
+  printf "ThisRootCost:   %d\n", $stp_group->{dot1dStpRootCost};
+  printf "ThisStpPrio:    %d\n", $stp_group->{dot1dStpPriority};
+  printf "RootBridgeMAC:  %s\n",
+    $stp_group->{dot1dStpDesignatedRootAddress};
+  printf "RootBridgePrio: %d\n",
+    $stp_group->{dot1dStpDesignatedRootPriority};
+
+  my $stp_ports = $session->get_dot1d_stp_port_table;
+  foreach my $port ( sort { $a <=> $b } keys %$stp_ports ) {
+    my $enabled = $stp_ports->{$port}{dot1dStpPortEnable};
+    next unless defined $enabled && $enabled == 1;
+
+    printf "----------- STP Port: %d ---------\n", $port;
+    printf "PState:      %d\n", $stp_ports->{$port}{dot1dStpPortState};
+    printf "PStateStr:   %d\n",
+      $stp_ports->{$port}{dot1dStpPortStateString};
+    printf "PPrio:       %d\n",
+      $stp_ports->{$port}{dot1dStpPortPriority};
+    printf "PCost:       %d\n",
+      $stp_ports->{$port}{dot1dStpPortPathCost};
+    printf "PDesigCost:  %d\n",
+      $stp_ports->{$port}{dot1dStpPortDesignatedCost};
+    printf "DBridgePrio: %d\n",
+      $stp_ports->{$port}{dot1dStpPortDesignatedBridgePriority};
+    printf "DBridgeMAC:  %d\n",
+      $stp_ports->{$port}{dot1dStpPortDesignatedBridgeAddress};
+    printf "DPortPrio:   %d\n",
+      $stp_ports->{$port}{dot1dStpPortDesignatedPortPriority};
+    printf "DPortNr:     %d\n",
+      $stp_ports->{$port}{dot1dStpPortDesignatedPortNumber};
+  }
 
 =head1 DESCRIPTION
 
-TODO
+This mixin reads data from the B<< dot1dStp >> group out of the BRIDGE-MIB. Normally it's implemented by those bridges that support the Spanning Tree Protocol.
 
 =head1 MIXIN METHODS
 
@@ -153,31 +171,8 @@ sub get_dot1d_stp_group {
   Carp::croak "'$prefix' not initialized,"
     unless $session->{$prefix}{__initialized};
 
-  my $result = {};
-
-  $result->{dot1dStpProtocolSpecification} =
-    $session->{$prefix}{dot1dStpProtocolSpecification};
-  $result->{dot1dStpPriority} = $session->{$prefix}{dot1dStpPriority};
-  $result->{dot1dStpTimeSinceTopologyChange} =
-    $session->{$prefix}{dot1dStpTimeSinceTopologyChange};
-  $result->{dot1dStpTopChanges}     = $session->{$prefix}{dot1dStpTopChanges};
-  $result->{dot1dStpDesignatedRoot} =
-    $session->{$prefix}{dot1dStpDesignatedRoot};
-  $result->{dot1dStpRootCost}     = $session->{$prefix}{dot1dStpRootCost};
-  $result->{dot1dStpRootPort}     = $session->{$prefix}{dot1dStpRootPort};
-  $result->{dot1dStpMaxAge}       = $session->{$prefix}{dot1dStpMaxAge};
-  $result->{dot1dStpHelloTime}    = $session->{$prefix}{dot1dStpHelloTime};
-  $result->{dot1dStpHoldTime}     = $session->{$prefix}{dot1dStpHoldTime};
-  $result->{dot1dStpForwardDelay} = $session->{$prefix}{dot1dStpForwardDelay};
-  $result->{dot1dStpBridgeMaxAge} = $session->{$prefix}{dot1dStpBridgeMaxAge};
-  $result->{dot1dStpBridgeHelloTime} =
-    $session->{$prefix}{dot1dStpBridgeHelloTime};
-  $result->{dot1dStpBridgeForwardDelay} =
-    $session->{$prefix}{dot1dStpBridgeForwardDelay};
-
-  ######
-  # calculated values from the structs
-  ######
+  # just a shallow copy for shallow values
+  my $result = { %{ $session->{$prefix}{dot1dStpGroup} } };
 
   # split BridgeId in priority and address
   my ( $root_bridge_prio, $root_bridge_address ) =
@@ -225,7 +220,9 @@ Returns the dot1dStpPortTable as a hash reference. The keys are the dot1d STP po
       dot1dStpPortDesignatedPortPriority => INTEGER,
       dot1dStpPortDesignatedPortNumber   => INTEGER,
 
-      }
+      },
+
+    ... ,
   }
 
 The structs BridgeId and PortId are already splitted by this mixin method into the relevant values for your convenience.
@@ -242,70 +239,79 @@ sub get_dot1d_stp_port_table {
     unless $session->{$prefix}{__initialized};
 
   # stash for return values
-  my $dot1dStpPortTable = {};
+  my $result = {};
 
-  # dot1dStpPortTable index
-  my @tableIndexes = keys %{ $session->{$prefix}{dot1dStpPortPriority} };
+  #
+  # the port's current state translation table
+  #
+  my %port_state_enum = (
+    1 => 'disabled',
+    2 => 'blocking',
+    3 => 'listening',
+    4 => 'learning',
+    5 => 'forwarding',
+    6 => 'broken',
+  );
 
-  foreach my $idx (@tableIndexes) {
-    my $row = {};
-    my (
-      $port_state,     $port_state_string, $bridge_prio,
-      $bridge_address, $portPrio,          $portNumber
-    );
+  # the MIB tables are stored in {column}{row}{value} order
+  # but we return {row}{column}{value}
+  #
+  # grab all rows from one random choosen column
+  my @rows = keys %{ $session->{$prefix}{dot1dStpPortTbl}{dot1dStpPortPriority} };
 
-    $row->{dot1dStpPortPriority} =
-      $session->{$prefix}{dot1dStpPortPriority}{$idx};
+  foreach my $row (@rows) {
 
-    $row->{dot1dStpPortState} = $session->{$prefix}{dot1dStpPortState}{$idx};
+    # loop over all columns
+    foreach my $column ( keys %{ $session->{$prefix}{dot1dStpPortTbl} } ) {
 
-    $row->{dot1dStpPortEnable} = $session->{$prefix}{dot1dStpPortEnable}{$idx};
+      # rebuild in reverse order: result(row,column) = stash(column,row)
+      # side effect: make a shallow copy for shallow values
 
-    $row->{dot1dStpPortPathCost} =
-      $session->{$prefix}{dot1dStpPortPathCost}{$idx};
+      $result->{$row}{$column} =
+        $session->{$prefix}{dot1dStpPortTbl}{$column}{$row};
+    }
 
-    $row->{dot1dStpPortDesignatedRoot} =
-      $session->{$prefix}{dot1dStpPortDesignatedRoot}{$idx};
+    #
+    # additonal calculated values from the structs
+    #
+    #
+    # resolve enum
+    #
+    $result->{$row}{dot1dStpPortStateString} =
+      $port_state_enum{ $result->{$row}{dot1dStpPortState} };
 
-    $row->{dot1dStpPortDesignatedCost} =
-      $session->{$prefix}{dot1dStpPortDesignatedCost}{$idx};
+    my ( $bridge_prio, $bridge_address);
 
-    $row->{dot1dStpPortDesignatedBridge} =
-      $session->{$prefix}{dot1dStpPortDesignatedBridge}{$idx};
-
-    $row->{dot1dStpPortDesignatedPort} =
-      $session->{$prefix}{dot1dStpPortDesignatedPort}{$idx};
-
-    $row->{dot1dStpPortForwardTransitions} =
-      $session->{$prefix}{dot1dStpPortForwardTransitions}{$idx};
-
-    ######
-    # calculated values from the structs
-    ######
-
-    $port_state                     = $row->{dot1dStpPortState};
-    $port_state_string              = $port_state_enum{$port_state};
-    $row->{dot1dStpPortStateString} = $port_state_string;
-
+    #
+    # split dot1dStpPortDesignatedRoot
+    #
     ( $bridge_prio, $bridge_address ) =
-      _unpack_bridge_id( $row->{dot1dStpPortDesignatedRoot} );
-    $row->{dot1dStpPortDesignatedRootPriority} = $bridge_prio;
-    $row->{dot1dStpPortDesignatedRootAddress}  = $bridge_address;
+      _unpack_bridge_id( $result->{$row}{dot1dStpPortDesignatedRoot} );
 
+    $result->{$row}{dot1dStpPortDesignatedRootPriority} = $bridge_prio;
+    $result->{$row}{dot1dStpPortDesignatedRootAddress}  = $bridge_address;
+
+    #
+    # split dot1dStpPortDesignatedBridge
+    #
     ( $bridge_prio, $bridge_address ) =
-      _unpack_bridge_id( $row->{dot1dStpPortDesignatedBridge} );
-    $row->{dot1dStpPortDesignatedBridgePriority} = $bridge_prio;
-    $row->{dot1dStpPortDesignatedBridgeAddress}  = $bridge_address;
+      _unpack_bridge_id( $result->{$row}{dot1dStpPortDesignatedBridge} );
 
+    $result->{$row}{dot1dStpPortDesignatedBridgePriority} = $bridge_prio;
+    $result->{$row}{dot1dStpPortDesignatedBridgeAddress}  = $bridge_address;
+
+    my ( $portPrio, $portNumber );
+    #
+    # split dot1dStpPortDesignatedPort
+    #
     ( $portPrio, $portNumber ) =
-      _unpack_bridge_port_id( $row->{dot1dStpPortDesignatedPort} );
-    $row->{dot1dStpPortDesignatedPortPriority} = $portPrio;
-    $row->{dot1dStpPortDesignatedPortNumber}   = $portNumber;
+      _unpack_bridge_port_id( $result->{$row}{dot1dStpPortDesignatedPort} );
 
-    $dot1dStpPortTable->{$idx} = $row;
+    $result->{$row}{dot1dStpPortDesignatedPortPriority} = $portPrio;
+    $result->{$row}{dot1dStpPortDesignatedPortNumber}   = $portNumber;
   }
 
-  return $dot1dStpPortTable;
+  return $result;
 }
 
 =head1 INITIALIZATION
@@ -393,38 +399,38 @@ sub _dot1d_stp_group_cb {
 
   return unless defined $vbl;
 
-  $session->{$prefix}{dot1dStpProtocolSpecification} =
-    $vbl->{ DOT1D_STP_PROTO() };
+  my $stash_ptr = $session->{$prefix}{dot1dStpGroup} = {};
 
-  $session->{$prefix}{dot1dStpPriority} = $vbl->{ DOT1D_STP_PRIO() };
+  $stash_ptr->{dot1dStpProtocolSpecification} = $vbl->{ DOT1D_STP_PROTO() };
 
-  $session->{$prefix}{dot1dStpTimeSinceTopologyChange} =
+  $stash_ptr->{dot1dStpPriority} = $vbl->{ DOT1D_STP_PRIO() };
+
+  $stash_ptr->{dot1dStpTimeSinceTopologyChange} =
     $vbl->{ DOT1D_STP_TIME_SINCE_TOPO_CHANGE() };
 
-  $session->{$prefix}{dot1dStpTopChanges} = $vbl->{ DOT1D_STP_TOPO_CHANGES() };
+  $stash_ptr->{dot1dStpTopChanges} = $vbl->{ DOT1D_STP_TOPO_CHANGES() };
 
-  $session->{$prefix}{dot1dStpDesignatedRoot} =
+  $stash_ptr->{dot1dStpDesignatedRoot} =
     $vbl->{ DOT1D_STP_DESIGNATED_ROOT() };
 
-  $session->{$prefix}{dot1dStpRootCost} = $vbl->{ DOT1D_STP_ROOT_COST() };
+  $stash_ptr->{dot1dStpRootCost} = $vbl->{ DOT1D_STP_ROOT_COST() };
 
-  $session->{$prefix}{dot1dStpRootPort} = $vbl->{ DOT1D_STP_ROOT_PORT() };
+  $stash_ptr->{dot1dStpRootPort} = $vbl->{ DOT1D_STP_ROOT_PORT() };
 
-  $session->{$prefix}{dot1dStpMaxAge} = $vbl->{ DOT1D_STP_MAX_AGE() };
+  $stash_ptr->{dot1dStpMaxAge} = $vbl->{ DOT1D_STP_MAX_AGE() };
 
-  $session->{$prefix}{dot1dStpHelloTime} = $vbl->{ DOT1D_STP_HELLO_TIME() };
+  $stash_ptr->{dot1dStpHelloTime} = $vbl->{ DOT1D_STP_HELLO_TIME() };
 
-  $session->{$prefix}{dot1dStpHoldTime} = $vbl->{ DOT1D_STP_HOLD_TIME() };
+  $stash_ptr->{dot1dStpHoldTime} = $vbl->{ DOT1D_STP_HOLD_TIME() };
 
-  $session->{$prefix}{dot1dStpForwardDelay} = $vbl->{ DOT1D_STP_FWD_DELAY() };
+  $stash_ptr->{dot1dStpForwardDelay} = $vbl->{ DOT1D_STP_FWD_DELAY() };
 
-  $session->{$prefix}{dot1dStpBridgeMaxAge} =
-    $vbl->{ DOT1D_STP_BRIDGE_MAX_AGE() };
+  $stash_ptr->{dot1dStpBridgeMaxAge} = $vbl->{ DOT1D_STP_BRIDGE_MAX_AGE() };
 
-  $session->{$prefix}{dot1dStpBridgeHelloTime} =
+  $stash_ptr->{dot1dStpBridgeHelloTime} =
     $vbl->{ DOT1D_STP_BRIDGE_HELLO_TIME() };
 
-  $session->{$prefix}{dot1dStpBridgeForwardDelay} =
+  $stash_ptr->{dot1dStpBridgeForwardDelay} =
     $vbl->{ DOT1D_STP_BRIDGE_FWD_DELAY() };
 
   $session->{$prefix}{__initialized}++;
@@ -471,31 +477,30 @@ sub _dot1d_stp_port_tbl_cb {
 
   return unless defined $vbl;
 
-  $session->{$prefix}{dot1dStpPortPriority} =
-    idx2val( $vbl, DOT1D_STP_PORT_PRIO );
+  my $stash_ptr = $session->{$prefix}{dot1dStpPortTbl} = {};
 
-  $session->{$prefix}{dot1dStpPortState} =
-    idx2val( $vbl, DOT1D_STP_PORT_STATE );
+  $stash_ptr->{dot1dStpPortPriority} = idx2val( $vbl, DOT1D_STP_PORT_PRIO );
 
-  $session->{$prefix}{dot1dStpPortEnable} =
-    idx2val( $vbl, DOT1D_STP_PORT_ENABLE );
+  $stash_ptr->{dot1dStpPortState} = idx2val( $vbl, DOT1D_STP_PORT_STATE );
 
-  $session->{$prefix}{dot1dStpPortPathCost} =
+  $stash_ptr->{dot1dStpPortEnable} = idx2val( $vbl, DOT1D_STP_PORT_ENABLE );
+
+  $stash_ptr->{dot1dStpPortPathCost} =
     idx2val( $vbl, DOT1D_STP_PORT_PATH_COST );
 
-  $session->{$prefix}{dot1dStpPortDesignatedRoot} =
+  $stash_ptr->{dot1dStpPortDesignatedRoot} =
     idx2val( $vbl, DOT1D_STP_PORT_DESIGNATED_ROOT );
 
-  $session->{$prefix}{dot1dStpPortDesignatedCost} =
+  $stash_ptr->{dot1dStpPortDesignatedCost} =
     idx2val( $vbl, DOT1D_STP_PORT_DESIGNATED_COST );
 
-  $session->{$prefix}{dot1dStpPortDesignatedBridge} =
+  $stash_ptr->{dot1dStpPortDesignatedBridge} =
     idx2val( $vbl, DOT1D_STP_PORT_DESIGNATED_BRIDGE );
 
-  $session->{$prefix}{dot1dStpPortDesignatedPort} =
+  $stash_ptr->{dot1dStpPortDesignatedPort} =
     idx2val( $vbl, DOT1D_STP_PORT_DESIGNATED_PORT );
 
-  $session->{$prefix}{dot1dStpPortForwardTransitions} =
+  $stash_ptr->{dot1dStpPortForwardTransitions} =
     idx2val( $vbl, DOT1D_STP_PORT_FORWARD_TRANSITIONS );
 
   $session->{$prefix}{__initialized}++;
