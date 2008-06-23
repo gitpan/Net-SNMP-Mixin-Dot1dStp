@@ -32,7 +32,7 @@ A script to get the STP information from switches supporting the MIBs.
 
 use blib;
 use Net::SNMP qw(:debug :snmp);
-use Net::SNMP::Mixin qw/mixer init_mixins/;
+use Net::SNMP::Mixin;
 
 use Getopt::Std;
 
@@ -78,47 +78,43 @@ foreach my $agent ( sort @agents ) {
 }
 snmp_dispatcher() if $Net::SNMP::NONBLOCKING;
 
-# remove sessions with error from the sessions list
-@sessions = grep { warn $_->error if $_->error; not $_->error } @sessions;
+# warn on errors during initialization
+foreach my $session (@sessions) {
+  if ( $session->errors ) {
+    foreach my $error ( $session->errors ) {
+      warn $session->hostname . ": $error\n";
+    }
+  }
+}
 
-print_stp();
+# remove sessions with errors from the sessions list
+@sessions = grep {not $_->errors(1)} @sessions;
+
+foreach my $session ( sort { $a->hostname cmp $b->hostname } @sessions ) {
+  print_stp($session);
+}
+
 exit 0;
 
 ###################### end of main ######################
 
-sub usage {
-  my @msg = @_;
-  die <<EOT;
->>>>>> @msg
-    Usage: $0 [options] hostname
-   
-    	-c community
-  	-v version
-  	-t timeout
-  	-r retries
-  	-d		Net::SNMP debug on
-	-i		read agents from stdin
-  	-B		nonblocking
-EOT
-}
-
 sub print_stp {
+  my $session = shift;
 
-  foreach my $session ( sort { $a->hostname cmp $b->hostname } @sessions ) {
     my $stp_group = $session->get_dot1d_stp_group;
     my $bridge_address =
       $session->get_dot1d_base_group->{dot1dBaseBridgeAddress};
 
     print "\n";
     printf "Hostname:       %s\n", $session->hostname;
-    printf "TopoChanges:    %d\n", $stp_group->{dot1dStpTopChanges};
-    printf "ThisRootPort:   %d\n", $stp_group->{dot1dStpRootPort};
-    printf "ThisRootCost:   %d\n", $stp_group->{dot1dStpRootCost};
+    printf "TopoChanges:    %s\n", $stp_group->{dot1dStpTopChanges};
+    printf "ThisRootPort:   %s\n", $stp_group->{dot1dStpRootPort};
+    printf "ThisRootCost:   %s\n", $stp_group->{dot1dStpRootCost};
     printf "ThisBridgeMAC:  %s\n", $bridge_address;
-    printf "ThisStpPrio:    %d\n", $stp_group->{dot1dStpPriority};
+    printf "ThisStpPrio:    %s\n", $stp_group->{dot1dStpPriority};
     printf "RootBridgeMAC:  %s\n",
       $stp_group->{dot1dStpDesignatedRootAddress};
-    printf "RootBridgePrio: %d\n",
+    printf "RootBridgePrio: %s\n",
       $stp_group->{dot1dStpDesignatedRootPriority};
 
     print '-' x 75, "\n";
@@ -153,14 +149,28 @@ sub print_stp {
       my $port_desig_port_nr =
         $stp_ports->{$port}{dot1dStpPortDesignatedPortNumber};
 
-      printf "%4d %4d %8d %10s | %4d %4d %8d %s %6d\n", $port, $port_prio,
+      printf "%4s %4s %8s %10s | %4s %4s %8s %s %6s\n", $port, $port_prio,
         $port_path_cost,       $port_state_string, $port_desig_port_nr,
         $port_desig_port_prio, $port_desig_cost,   $port_desig_bridge_mac,
         $port_desig_bridge_prio,;
     }
     print "\n";
-  }
+}
 
+sub usage {
+  my @msg = @_;
+  die <<EOT;
+>>>>>> @msg
+    Usage: $0 [options] hostname
+   
+    	-c community
+  	-v version
+  	-t timeout
+  	-r retries
+  	-d		Net::SNMP debug on
+	-i		read agents from stdin
+  	-B		nonblocking
+EOT
 }
 
 =head1 AUTHOR

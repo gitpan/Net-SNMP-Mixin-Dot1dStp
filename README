@@ -3,18 +3,18 @@ NAME
     information
 
 VERSION
-    Version 0.02
+    Version 0.03
 
 SYNOPSIS
       use Net::SNMP;
-      use Net::SNMP::Mixin qw/mixer init_mixins/;
+      use Net::SNMP::Mixin;
 
       my $session = Net::SNMP->session( -hostname => 'foo.bar.com' );
       $session->mixer('Net::SNMP::Mixin::Dot1dStp');
       $session->init_mixins;
 
-      snmp_dispatcher()   if $session->nonblocking;
-      die $session->error if $session->error;
+      snmp_dispatcher();
+      die $session->errors if $session->errors;
 
       my $stp_group = $session->get_dot1d_stp_group;
 

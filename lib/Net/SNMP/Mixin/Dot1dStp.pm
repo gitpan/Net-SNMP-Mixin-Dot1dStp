@@ -14,7 +14,7 @@ my $prefix = __PACKAGE__;
 # this module import config
 #
 use Carp ();
-use Net::SNMP::Mixin::Util qw/idx2val hex2octet normalize_mac/;
+use Net::SNMP::Mixin::Util qw/idx2val hex2octet normalize_mac push_error/;
 
 #
 # this module export config
@@ -58,7 +58,6 @@ use constant {
 
   DOT1D_STP_PORT_TABLE => '1.3.6.1.2.1.17.2.15',
 
-  DOT1D_STP_PORT_INDEX               => '1.3.6.1.2.1.17.2.15.1.1',
   DOT1D_STP_PORT_PRIO                => '1.3.6.1.2.1.17.2.15.1.2',
   DOT1D_STP_PORT_STATE               => '1.3.6.1.2.1.17.2.15.1.3',
   DOT1D_STP_PORT_ENABLE              => '1.3.6.1.2.1.17.2.15.1.4',
@@ -76,23 +75,23 @@ Net::SNMP::Mixin::Dot1dStp - mixin class for 802.1D spanning tree information
 
 =head1 VERSION
 
-Version 0.02
+Version 0.03
 
 =cut
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 =head1 SYNOPSIS
 
   use Net::SNMP;
-  use Net::SNMP::Mixin qw/mixer init_mixins/;
+  use Net::SNMP::Mixin;
 
   my $session = Net::SNMP->session( -hostname => 'foo.bar.com' );
   $session->mixer('Net::SNMP::Mixin::Dot1dStp');
   $session->init_mixins;
 
-  snmp_dispatcher()   if $session->nonblocking;
-  die $session->error if $session->error;
+  snmp_dispatcher();
+  die $session->errors if $session->errors;
 
   my $stp_group = $session->get_dot1d_stp_group;
 
@@ -352,24 +351,9 @@ sub _fetch_dot1d_stp_group {
   my $session = shift;
   my $result;
 
-  $result = $session->get_request(
-    -varbindlist => [
-
-      DOT1D_STP_PROTO,
-      DOT1D_STP_PRIO,
-      DOT1D_STP_TIME_SINCE_TOPO_CHANGE,
-      DOT1D_STP_TOPO_CHANGES,
-      DOT1D_STP_DESIGNATED_ROOT,
-      DOT1D_STP_ROOT_COST,
-      DOT1D_STP_ROOT_PORT,
-      DOT1D_STP_MAX_AGE,
-      DOT1D_STP_HELLO_TIME,
-      DOT1D_STP_HOLD_TIME,
-      DOT1D_STP_FWD_DELAY,
-      DOT1D_STP_BRIDGE_MAX_AGE,
-      DOT1D_STP_BRIDGE_HELLO_TIME,
-      DOT1D_STP_BRIDGE_FWD_DELAY,
-    ],
+  $result = $session->get_entries(
+    -columns  => [ DOT1D_STP_GROUP, ],
+    -endindex => '14.0',
 
     # define callback if in nonblocking mode
     $session->nonblocking
@@ -378,11 +362,19 @@ sub _fetch_dot1d_stp_group {
 
   );
 
-  return unless defined $result;
+  unless (defined $result) {
+    # Net::SNMP looses sometimes error messages in nonblocking
+    # mode, so we save them in an extra buffer
+    my $err_msg = $session->error;
+    push_error($session, "$prefix: $err_msg") if $err_msg;
+    return;
+  }
+
+  # in nonblocking mode the callback will be called asynchronously
   return 1 if $session->nonblocking;
 
-  # call the callback function in blocking mode by hand
-  # in order to process the result
+  # ok we are in synchronous mode, call the result mangling function
+  # by hand
   _dot1d_stp_group_cb($session);
 
 }
@@ -397,7 +389,19 @@ sub _dot1d_stp_group_cb {
   my $session = shift;
   my $vbl     = $session->var_bind_list;
 
-  return unless defined $vbl;
+  unless (defined $vbl) {
+    # Net::SNMP looses sometimes error messages in nonblocking
+    # mode, so we save them in an extra buffer
+    my $err_msg = $session->error;
+    push_error($session, "$prefix: $err_msg") if $err_msg;
+    return;
+  }
+
+  unless ( defined $vbl->{ DOT1D_STP_PROTO() } ) {
+    my $err_msg = "No Spanning Tree Protocol running";
+    push_error( $session, "$prefix: $err_msg" ) if $err_msg;
+    return;
+  }
 
   my $stash_ptr = $session->{$prefix}{dot1dStpGroup} = {};
 
@@ -447,8 +451,14 @@ sub _fetch_dot1d_stp_port_tbl {
   my $result;
 
   # fetch the dot1dStpPortTable
-  $result = $session->get_table(
-    -baseoid => DOT1D_STP_PORT_TABLE,
+  $result = $session->get_entries(
+    -columns => [
+      DOT1D_STP_PORT_PRIO,              DOT1D_STP_PORT_STATE,
+      DOT1D_STP_PORT_ENABLE,            DOT1D_STP_PORT_PATH_COST,
+      DOT1D_STP_PORT_DESIGNATED_ROOT,   DOT1D_STP_PORT_DESIGNATED_COST,
+      DOT1D_STP_PORT_DESIGNATED_BRIDGE, DOT1D_STP_PORT_DESIGNATED_PORT,
+      DOT1D_STP_PORT_FORWARD_TRANSITIONS,
+    ],
 
     # define callback if in nonblocking mode
     $session->nonblocking
@@ -456,11 +466,19 @@ sub _fetch_dot1d_stp_port_tbl {
     : (),
   );
 
-  return unless defined $result;
+  unless (defined $result) {
+    # Net::SNMP looses sometimes error messages in nonblocking
+    # mode, so we save them in an extra buffer
+    my $err_msg = $session->error;
+    push_error($session, "$prefix: $err_msg") if $err_msg;
+    return;
+  }
+
+  # in nonblocking mode the callback will be called asynchronously
   return 1 if $session->nonblocking;
 
-  # call the callback function in blocking mode by hand
-  # in order to process the result
+  # ok we are in synchronous mode, call the result mangling function
+  # by hand
   _dot1d_stp_port_tbl_cb($session);
 
 }
@@ -475,7 +493,13 @@ sub _dot1d_stp_port_tbl_cb {
   my $session = shift;
   my $vbl     = $session->var_bind_list;
 
-  return unless defined $vbl;
+  unless (defined $vbl) {
+    # Net::SNMP looses sometimes error messages in nonblocking
+    # mode, so we save them in an extra buffer
+    my $err_msg = $session->error;
+    push_error($session, "$prefix: $err_msg") if $err_msg;
+    return;
+  }
 
   my $stash_ptr = $session->{$prefix}{dot1dStpPortTbl} = {};
 
